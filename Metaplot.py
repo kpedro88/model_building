@@ -41,15 +41,16 @@ lines = ["solid", "dashed", "dotted", "dashdot", (0, (3, 5, 1, 5, 1, 5)), (0, (3
 markers = ['o', 's', 'D', 'v', '^', '*']
 custom_cycler = mpl.cycler(color=colors) + mpl.cycler(linestyle=lines) + mpl.cycler(marker=markers)
 
-def process_data(data, x, qname, forcex):
+def process_data(data, x, qname, forcex, alignx):
     processed = []
     for sample, models in data.items():
         xvals = np.array([model['meta'][x] for model in models])
+        avals = np.array([model['meta'][alignx] for model in models])
         means, stdevs, stderrs, hists = zip(*[
             (model['meta'][qname]['mean'], model['meta'][qname]['stdev'], model['meta'][qname]['stderr'], model['hist'].get(qname,None)) for model in models
         ])
         # order by rinv_pred
-        order = np.argsort(xvals)
+        order = np.argsort(avals)
         processed_dict = dict(
             sample = sample,
             xvals = xvals[order],
@@ -151,7 +152,7 @@ def make_plot(type, data, x, xlabel, qname, outdir, offset):
     plt.savefig(f'{outdir}/{type}_{qname}.pdf',bbox_inches='tight')
     plt.close(fig)
 
-def make_all_plots(outdir, types, sample_list, x, y, xlabel, forcex, offset):
+def make_all_plots(outdir, types, sample_list, x, y, xlabel, forcex, alignx, offset):
     data = {} # hists + metadata for all models
 
     for sample in samples:
@@ -171,7 +172,7 @@ def make_all_plots(outdir, types, sample_list, x, y, xlabel, forcex, offset):
 
     os.makedirs(outdir, exist_ok=True)
     for qname in y:
-        processed = process_data(data, x, qname, forcex)
+        processed = process_data(data, x, qname, forcex, alignx)
         for plot_type in types:
             make_plot(plot_type, processed, x, xlabel, qname, outdir, offset)
 
@@ -197,6 +198,7 @@ if __name__=="__main__":
     parser.add_argument("-x", type=str, default='rinv', help="x variable")
     parser.add_argument("--xlabel", type=str, default=None, help="x axis label")
     parser.add_argument("--forcex", type=str, default=None, help="force use of x values from specified sample")
+    parser.add_argument("--alignx", type=str, default=None, help="sort samples using specified variable (may be different from x axis variable)")
     parser.add_argument("-y", type=str, default=qtys_default, nargs='*', help="y variable(s)")
     parser.add_argument("--offset", type=int, default=0, help="offset for color/style cycler")
     args = parser.parse_args()
@@ -205,4 +207,7 @@ if __name__=="__main__":
     if unknown_samples:
         raise ValueError("Unknown sample(s) requested:",','.join(unknown_samples))
 
-    make_all_plots(args.dir, args.types, args.samples, args.x, args.y, args.xlabel, args.forcex, args.offset)
+    if args.alignx is None:
+        args.alignx = args.x
+
+    make_all_plots(args.dir, args.types, args.samples, args.x, args.y, args.xlabel, args.forcex, args.alignx, args.offset)
