@@ -41,24 +41,46 @@ lines = ["solid", "dashed", "dotted", "dashdot", (0, (3, 5, 1, 5, 1, 5)), (0, (3
 markers = ['o', 's', 'D', 'v', '^', '*']
 custom_cycler = mpl.cycler(color=colors) + mpl.cycler(linestyle=lines) + mpl.cycler(marker=markers)
 
-def process_data(data, x, qname, forcex, alignx):
+def get_stat(val, stat):
+    if isinstance(val,dict):
+        return val[stat]
+    else:
+        if stat=='mean': return val
+        else: return 0
+
+def sort_data(dict_in, order):
+    return dict(
+        sample = dict_in['sample'],
+        xvals = dict_in['xvals'][order],
+        means = dict_in['means'][order],
+        stdevs = dict_in['stdevs'][order],
+        stderrs = dict_in['stderrs'][order],
+        hists = [dict_in['hists'][i] for i in order] if len(dict_in['hists']) > 0 else [],
+    )
+
+def process_data(data, x, qname, forcex, alignx, nosortx):
     processed = []
     for sample, models in data.items():
         xvals = np.array([model['meta'][x] for model in models])
         avals = np.array([model['meta'][alignx] for model in models])
         means, stdevs, stderrs, hists = zip(*[
-            (model['meta'][qname]['mean'], model['meta'][qname]['stdev'], model['meta'][qname]['stderr'], model['hist'].get(qname,None)) for model in models
+            (get_stat(model['meta'][qname], 'mean'),
+             get_stat(model['meta'][qname], 'stdev'),
+             get_stat(model['meta'][qname], 'stderr'),
+             model['hist'].get(qname,None)
+            ) for model in models
         ])
-        # order by rinv_pred
-        order = np.argsort(avals)
-        processed_dict = dict(
+        dict_raw = dict(
             sample = sample,
-            xvals = xvals[order],
-            means = np.array(means)[order],
-            stdevs = np.array(stdevs)[order],
-            stderrs = np.array(stderrs)[order],
-            hists = [hists[i] for i in order],
+            xvals = xvals,
+            means = np.array(means),
+            stdevs = np.array(stdevs),
+            stderrs = np.array(stderrs),
+            hists = hists,
         )
+        # align samples by specified var
+        order = np.argsort(avals)
+        processed_dict = sort_data(dict_raw, order)
         hists_missing = [h is None for h in processed_dict['hists']]
         if all(hists_missing):
             processed_dict['hists'] = []
@@ -71,6 +93,11 @@ def process_data(data, x, qname, forcex, alignx):
         forcexvals = next((pd['xvals'] for pd in processed if pd['sample']==forcex))
         for processed_dict in processed:
             processed_dict['xvals'] = forcexvals
+    # sort by x value *after* alignment and *after* forcex (if specified)
+    if not nosortx:
+        for i,pd in enumerate(processed):
+            order = np.argsort(pd['xvals'])
+            processed[i] = sort_data(pd, order)
     return processed
 
 # helper to make a plot
@@ -152,7 +179,7 @@ def make_plot(type, data, x, xlabel, qname, outdir, offset):
     plt.savefig(f'{outdir}/{type}_{qname}.pdf',bbox_inches='tight')
     plt.close(fig)
 
-def make_all_plots(outdir, types, sample_list, x, y, xlabel, forcex, alignx, offset):
+def make_all_plots(outdir, types, sample_list, x, y, xlabel, forcex, alignx, nosortx, offset):
     data = {} # hists + metadata for all models
 
     for sample in samples:
@@ -172,7 +199,7 @@ def make_all_plots(outdir, types, sample_list, x, y, xlabel, forcex, alignx, off
 
     os.makedirs(outdir, exist_ok=True)
     for qname in y:
-        processed = process_data(data, x, qname, forcex, alignx)
+        processed = process_data(data, x, qname, forcex, alignx, nosortx)
         for plot_type in types:
             make_plot(plot_type, processed, x, xlabel, qname, outdir, offset)
 
@@ -198,7 +225,8 @@ if __name__=="__main__":
     parser.add_argument("-x", type=str, default='rinv', help="x variable")
     parser.add_argument("--xlabel", type=str, default=None, help="x axis label")
     parser.add_argument("--forcex", type=str, default=None, help="force use of x values from specified sample")
-    parser.add_argument("--alignx", type=str, default=None, help="sort samples using specified variable (may be different from x axis variable)")
+    parser.add_argument("--alignx", type=str, default=None, help="align samples using specified variable (may be different from x axis variable)")
+    parser.add_argument("--nosortx", default=False, action="store_true", help="don't sort by x value (use align variable)")
     parser.add_argument("-y", type=str, default=qtys_default, nargs='*', help="y variable(s)")
     parser.add_argument("--offset", type=int, default=0, help="offset for color/style cycler")
     args = parser.parse_args()
@@ -210,4 +238,4 @@ if __name__=="__main__":
     if args.alignx is None:
         args.alignx = args.x
 
-    make_all_plots(args.dir, args.types, args.samples, args.x, args.y, args.xlabel, args.forcex, args.alignx, args.offset)
+    make_all_plots(args.dir, args.types, args.samples, args.x, args.y, args.xlabel, args.forcex, args.alignx, args.nosortx, args.offset)
