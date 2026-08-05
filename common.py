@@ -11,15 +11,18 @@ import fnmatch
 import shutil
 from glob import glob
 from XRootD import client as xrootd_client
+import pickle
 
 DelphesSchema.mixins.update({
     "ParticleFlowCandidate": "Particle",
+    "DarkPartonCandidate": "Particle",
     "DarkHadronCandidate": "Particle",
     "GenCandidate": "Particle",
     "GenStableCandidate": "Particle",
     "GenParticle": "Particle",
     "FatJet": "Jet",
     "GenFatJet": "Jet",
+    "DarkPartonJet": "Jet",
     "DarkHadronJet": "Jet",
     "DarkHadronVisibleJet": "Jet",
     "DarkHadronStableJet": "Jet",
@@ -32,6 +35,7 @@ def fix_delphes_mass_units(events):
         "GenParticle",
         "GenCandidate",
         "GenStableCandidate",
+        "DarkPartonCandidate",
         "DarkHadronCandidate",
     ]
     for col in GenParticleCollections:
@@ -42,6 +46,7 @@ class DelphesSchema2(DelphesSchema):
     jet_const_pairs = {
         "FatJet" : "ParticleFlowCandidate",
         "Jet" : "ParticleFlowCandidate",
+        "DarkPartonJet" : "DarkPartonCandidate",
         "DarkHadronJet" : "DarkHadronCandidate",
         "DarkHadronVisibleJet": "GenCandidate",
         "DarkHadronStableJet": "GenStableCandidate",
@@ -117,6 +122,8 @@ def get_constituents_chunk(events, jetsname, candsname):
     gathered = flat_cands[flat_indices]
 
     # rebuild structure (one level at a time)
+    counts_all = np.asarray(counts_all, dtype=np.int64)
+    jets_per_event = np.asarray(jets_per_event, dtype=np.int64)
     jets_level = ak.unflatten(gathered, counts_all)
     events_level = ak.unflatten(jets_level, jets_per_event)
 

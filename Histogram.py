@@ -187,15 +187,19 @@ def calc_rinv(events, helper, meta_dict, debug):
 
     # quick diversion here to measure alpha = E_pi / m_rho for 3-body decays
     is_dark_3body = is_dark_final & dark_mother_sm_sibling
-    pi_3body = events.GenParticle[is_dark_3body]
-    rho_3body = events.GenParticle[m1[is_dark_3body]]
-    pi_3body_restframe = pi_3body.boostCM_of_beta3(rho_3body.to_beta3())
-    E_pi_3body = pi_3body_restframe.energy
-    m_rho_3body = rho_3body.mass
-    alpha_3body = E_pi_3body/m_rho_3body
-    meta_dict["alpha_3body"] = fill_stats(alpha_3body)
-    print(f"Average alpha_3body = {meta_dict['alpha_3body']['mean']:.3} ({meta_dict['alpha_3body']['stdev']:.3})")
-    events["alpha_3body"] = alpha_3body
+    if ak.any(is_dark_3body):
+        pi_3body = events.GenParticle[is_dark_3body]
+        rho_3body = events.GenParticle[m1[is_dark_3body]]
+        pi_3body_restframe = pi_3body.boostCM_of_beta3(rho_3body.to_beta3())
+        E_pi_3body = pi_3body_restframe.energy
+        m_rho_3body = rho_3body.mass
+        alpha_3body = E_pi_3body/m_rho_3body
+        meta_dict["alpha_3body"] = fill_stats(alpha_3body)
+        print(f"Average alpha_3body = {meta_dict['alpha_3body']['mean']:.3} ({meta_dict['alpha_3body']['stdev']:.3})")
+        events["alpha_3body"] = alpha_3body
+    else:
+        events["alpha_3body"] = ak.Array([0])
+        meta_dict["alpha_3body"] = fill_stats(events["alpha_3body"])
 
     is_dark_final = is_dark_final & ~dark_mother_sm_sibling
     printer('is_dark_final',is_dark_final)
@@ -256,7 +260,7 @@ def fill_stats(array):
         "stderr": sem(nparray),
     }
 
-def histogram(filename, helper, with_constituents=True, debug=False):
+def histogram(filename, helper, with_constituents=True, gen_only=False, debug=False):
     events = load_events(filename, with_constituents=with_constituents)
 
     # output dictionary with histograms and metadata
@@ -264,63 +268,64 @@ def histogram(filename, helper, with_constituents=True, debug=False):
     output["model"] = helper.metadata()
     meta_dict = {}
 
-    # require two jets
-    mask = ak.num(events.FatJet)>=2
-    events = events[mask]
-
-    #get rid of None Events
+    # get rid of None Events
     mask2 = ~ak.is_none(events.Event.Number)
     events = events[mask2]
 
-    # Dijet
-    events["Dijet"] = events.FatJet[:,0]+events.FatJet[:,1]
+    if not gen_only:
+        # require two jets
+        mask = ak.num(events.FatJet)>=2
+        events = events[mask]
 
-    # transverse mass calculation
-    events["MT"] = calc_mt(events.Dijet, events.MissingET)
+        # Dijet
+        events["Dijet"] = events.FatJet[:,0]+events.FatJet[:,1]
 
-    # 4-vectors for dijet
-    events["Dijet_pt"] = events.Dijet.pt
-    events["Dijet_eta"] = events.Dijet.eta
-    events["Dijet_phi"] = events.Dijet.phi
-    events["Dijet_mass"] = events.Dijet.mass
+        # transverse mass calculation
+        events["MT"] = calc_mt(events.Dijet, events.MissingET)
 
-    events["MET"] = events.MissingET.MET
+        # 4-vectors for dijet
+        events["Dijet_pt"] = events.Dijet.pt
+        events["Dijet_eta"] = events.Dijet.eta
+        events["Dijet_phi"] = events.Dijet.phi
+        events["Dijet_mass"] = events.Dijet.mass
 
-    ## For plotting individually for jet1 and jet2
-    events["Jet12"] = ak.pad_none(events.FatJet[:,0:2], target=2, axis=1)
+        events["MET"] = events.MissingET.MET
 
-    # 4-vectors for jet1 and jet2
-    events["Jet12_pt"] = events["Jet12"].pt
-    events["Jet12_eta"] = events["Jet12"].eta
-    events["Jet12_phi"] = events["Jet12"].phi
-    events["Jet12_mass"] = events["Jet12"].mass
+        ## For plotting individually for jet1 and jet2
+        events["Jet12"] = ak.pad_none(events.FatJet[:,0:2], target=2, axis=1)
 
-    events["DeltaEta"] = np.abs(events["Jet12_eta"][:,0] - events["Jet12_eta"][:,1])
-    events["DeltaPhi"] = np.abs(events["Jet12"][:,0].deltaphi(events["Jet12"][:,1]))
+        # 4-vectors for jet1 and jet2
+        events["Jet12_pt"] = events["Jet12"].pt
+        events["Jet12_eta"] = events["Jet12"].eta
+        events["Jet12_phi"] = events["Jet12"].phi
+        events["Jet12_mass"] = events["Jet12"].mass
 
-    events["DeltaPhi_MET_Jet12"] = np.abs(events.MissingET.deltaphi(events["Jet12"]))
+        events["DeltaEta"] = np.abs(events["Jet12_eta"][:,0] - events["Jet12_eta"][:,1])
+        events["DeltaPhi"] = np.abs(events["Jet12"][:,0].deltaphi(events["Jet12"][:,1]))
 
-    # add substructure quantities
-    kt_cuts = [1,2,5,10]
-    n_ecf = [2,3]
-    if with_constituents:
-        events["Jet12_girth"] = calculate_girth(events["Jet12"])
-        events["Jet12_ptD"] = calculate_ptD(events["Jet12"])
-        events["Jet12_majoraxis"], events["Jet12_minoraxis"] = calc_axis1_axis2(events["Jet12"])
+        events["DeltaPhi_MET_Jet12"] = np.abs(events.MissingET.deltaphi(events["Jet12"]))
 
-        # maybe do this in a nicer way, looping is annoying
-        jet12_shape = ak.num(events['Jet12'],axis=1)
-        jet12_flat = ak.flatten(events['Jet12'],axis=1)
-        cs = fj_cluster_sequence(jet12_flat)
-        for k in kt_cuts: 
-            events[f"Jet12_lundMult{k}"] = ak.unflatten(getLundMultiplicity(cs, kt = k), jet12_shape)
-        for n in n_ecf:
-            events[f"Jet12_ECF{n}"] = ak.unflatten(getECF(cs, npointECF = n), jet12_shape)
+        # add substructure quantities
+        kt_cuts = [1,2,5,10]
+        n_ecf = [2,3]
+        if with_constituents:
+            events["Jet12_girth"] = calculate_girth(events["Jet12"])
+            events["Jet12_ptD"] = calculate_ptD(events["Jet12"])
+            events["Jet12_majoraxis"], events["Jet12_minoraxis"] = calc_axis1_axis2(events["Jet12"])
 
-    events["Jet12_sdmass"] = events["Jet12"].SoftDroppedJet.mass
-    events["Jet12_sdpt"] = events["Jet12"].SoftDroppedJet.pt
+            # maybe do this in a nicer way, looping is annoying
+            jet12_shape = ak.num(events['Jet12'],axis=1)
+            jet12_flat = ak.flatten(events['Jet12'],axis=1)
+            cs = fj_cluster_sequence(jet12_flat)
+            for k in kt_cuts:
+                events[f"Jet12_lundMult{k}"] = ak.unflatten(getLundMultiplicity(cs, kt = k), jet12_shape)
+            for n in n_ecf:
+                events[f"Jet12_ECF{n}"] = ak.unflatten(getECF(cs, npointECF = n), jet12_shape)
 
-    events = getTau(events)
+        events["Jet12_sdmass"] = events["Jet12"].SoftDroppedJet.mass
+        events["Jet12_sdpt"] = events["Jet12"].SoftDroppedJet.pt
+
+        events = getTau(events)
 
     # gen-level info
     pid = events.GenParticle["PID"]
@@ -342,11 +347,12 @@ def histogram(filename, helper, with_constituents=True, debug=False):
     print(f"Predicted rinv = {output['model'].get('rinv_3body', output.get('rinvpred_3body', output['model'].get('rinv',output['model'].get('rinvpred', -1)))):.5}")
     calc_rinv(events, helper, meta_dict, debug)
 
-    # dark hadron jets and corresponding visible and invisible+visible jets
+    # dark parton/hadron jets and corresponding visible and invisible+visible jets
+    events["DPJet12"] = ak.pad_none(events.DarkPartonJet[:,0:2], target=2, axis=1)
     events["DHJet12"] = ak.pad_none(events.DarkHadronJet[:,0:2], target=2, axis=1)
     events["DHVJet12"] = ak.pad_none(events.DarkHadronVisibleJet[:,0:2], target=2, axis=1)
     events["DHIVJet12"] = ak.pad_none(events.DarkHadronStableJet[:,0:2], target=2, axis=1)
-    dhj_pre = ["DH", "DHV", "DHIV"]
+    dhj_pre = ["DP", "DH", "DHV", "DHIV"]
     jet_inds = [0, 1, slice(0, 2)]
     jet_ind_names = ["1","2","1,2"]
     jet_ind_keys = ["1","2","12"]
@@ -423,7 +429,11 @@ def histogram(filename, helper, with_constituents=True, debug=False):
                     [f"{meta_dict[f'DHJet{key}_radius{pct}']['mean']:.2} ({meta_dict[f'DHJet{key}_radius{pct}']['stdev']:.2})" for key in jet_ind_keys]
                 ))
 
-    # dark hadron jet mass and pt
+    # dark parton/hadron jet mass and pt
+    events["DPJet12_pt"] = events["DPJet12"].pt
+    events["DiDPJet"] = events["DPJet12"][:,0] + events["DPJet12"][:,1]
+    events["DiDPJet_mass"] = events["DiDPJet"].mass
+
     events["DHJet12_pt"] = events["DHJet12"].pt
     events["DiDHJet"] = events["DHJet12"][:,0] + events["DHJet12"][:,1]
     events["DiDHJet_mass"] = events["DiDHJet"].mass
@@ -462,60 +472,60 @@ def histogram(filename, helper, with_constituents=True, debug=False):
             return results
 
     # Creating hist objects
-    hist_dict = dict(chain.from_iterable([
-        fill_hist("MT",50,0,mmed*1.5,r"$m_{\text{T}}$ [GeV]"),
-        fill_hist("Dijet_pt",50,0,mmed*0.75,r"$p_{\text{T}}(JJ)$ [GeV]"),
-        fill_hist("Dijet_eta",50,-10,10,r"$\eta(JJ)$ [GeV]"),
-        fill_hist("Dijet_phi",25,-3.15,3.15,r"$\phi(JJ)$"),
-        fill_hist("Dijet_mass",50,0,mmed*1.5,r"$m_{JJ}$ [GeV]"),
-        fill_hist("Jet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND})$ [GeV]"),
-        fill_hist("Jet12_eta",50,-6,6,r"$\eta(J_{JETIND})$"),
-        fill_hist("Jet12_phi",25,-3.15,3.15,r"$\phi(J_{JETIND})$"),
-        fill_hist("Jet12_mass",50,0,250,r"$m_{J_{JETIND}}$ [GeV]"),
-        fill_hist("MET",50,0,mmed*0.75,r"$p_{\text{T}}^{\text{miss}}$ [GeV]"),
-        fill_hist("DeltaEta",35,0,8.0,r"$\Delta\eta(JJ)$"),
-        fill_hist("DeltaPhi",20,0,3.15,r"$\Delta\phi(JJ)$"),
-        fill_hist("DeltaPhi_MET_Jet12",25,0,3.15,r"$\Delta\phi(J_{JETIND},p_{\text{T}}^{\text{miss}})$"),
-    ]))
-    if with_constituents:
+    hist_dict = {}
+
+    # reco-level histograms
+    if not gen_only:
         hist_dict.update(chain.from_iterable([
-            fill_hist("Jet12_girth",50,0,1,r"$g_{\text{jet}}(J_{JETIND})$"),
-            fill_hist("Jet12_ptD",50,0,1.01,r"$D_{p_{\text{T}}}(J_{JETIND})$"),
-            fill_hist("Jet12_majoraxis",50,0,0.5,r"$\sigma_{\text{major}}(J_{JETIND})$"),
-            fill_hist("Jet12_minoraxis",50,0,0.5,r"$\sigma_{\text{minor}}(J_{JETIND})$"),
-            fill_hist("DHIVJet12_rinv_proj",25,0,1,r"$r_{\text{inv}}^{\text{kin}}(J_{JETIND}^{\text{stable}})$"),
-            fill_hist("DiDHIVJet_rinv_proj",25,0,1,r"$r_{\text{inv}}^{\text{kin}}(J^{\text{stable}}J^{\text{stable}})$"),
-            fill_hist("DHIVJet12_rinv_shape",25,0,1,r"$r_{\text{inv}}^{\text{kin(alt)}}(J_{JETIND}^{\text{stable}})$"),
-            fill_hist("DiDHIVJet_rinv_shape",25,0,1,r"$r_{\text{inv}}^{\text{kin(alt)}}(J^{\text{stable}}J^{\text{stable}})$"),
+            fill_hist("MT",50,0,mmed*1.5,r"$m_{\text{T}}$ [GeV]"),
+            fill_hist("Dijet_pt",50,0,mmed*0.75,r"$p_{\text{T}}(JJ)$ [GeV]"),
+            fill_hist("Dijet_eta",50,-10,10,r"$\eta(JJ)$ [GeV]"),
+            fill_hist("Dijet_phi",25,-3.15,3.15,r"$\phi(JJ)$"),
+            fill_hist("Dijet_mass",50,0,mmed*1.5,r"$m_{JJ}$ [GeV]"),
+            fill_hist("Jet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND})$ [GeV]"),
+            fill_hist("Jet12_eta",50,-6,6,r"$\eta(J_{JETIND})$"),
+            fill_hist("Jet12_phi",25,-3.15,3.15,r"$\phi(J_{JETIND})$"),
+            fill_hist("Jet12_mass",50,0,250,r"$m_{J_{JETIND}}$ [GeV]"),
+            fill_hist("MET",50,0,mmed*0.75,r"$p_{\text{T}}^{\text{miss}}$ [GeV]"),
+            fill_hist("DeltaEta",35,0,8.0,r"$\Delta\eta(JJ)$"),
+            fill_hist("DeltaPhi",20,0,3.15,r"$\Delta\phi(JJ)$"),
+            fill_hist("DeltaPhi_MET_Jet12",25,0,3.15,r"$\Delta\phi(J_{JETIND},p_{\text{T}}^{\text{miss}})$"),
+            fill_hist("Jet12_sdmass",50,0,150,r"$m_{\text{SD}}(J_{JETIND})$ [GeV]"),
+            fill_hist("Jet12_sdpt",50,0,mmed*0.75,r"$p^{\text{SD}}_{\text{T}}(J_{JETIND})$ [GeV]"),
         ]))
-        for k in kt_cuts: 
-            label = f'Primary Lund Multiplicity $k_T$>{k} GeV$'
+        if with_constituents:
             hist_dict.update(chain.from_iterable([
-                fill_hist(f'Jet12_lundMult{k}',12,0,12,label)
-            ]))    
-        for n in n_ecf:
-            label = f'$C_{n}^{{\\beta=1}}$'
+                fill_hist("Jet12_girth",50,0,1,r"$g_{\text{jet}}(J_{JETIND})$"),
+                fill_hist("Jet12_ptD",50,0,1.01,r"$D_{p_{\text{T}}}(J_{JETIND})$"),
+                fill_hist("Jet12_majoraxis",50,0,0.5,r"$\sigma_{\text{major}}(J_{JETIND})$"),
+                fill_hist("Jet12_minoraxis",50,0,0.5,r"$\sigma_{\text{minor}}(J_{JETIND})$"),
+            ]))
+            for k in kt_cuts:
+                label = f'Primary Lund Multiplicity $k_T$>{k} GeV$'
+                hist_dict.update(chain.from_iterable([
+                    fill_hist(f'Jet12_lundMult{k}',12,0,12,label)
+                ]))
+            for n in n_ecf:
+                label = f'$C_{n}^{{\\beta=1}}$'
+                hist_dict.update(chain.from_iterable([
+                    fill_hist(f'Jet12_ECF{n}',30,0,0.3,label)
+                ]))
+
+        for t in events.fields:
+            if 'tau' not in t: continue
+            l = t.split('_')
+            label = l[1].replace('tau', '$\\tau_{')+','+l[0].replace('et12', '_{JETIND}')+'}$'
             hist_dict.update(chain.from_iterable([
-                fill_hist(f'Jet12_ECF{n}',30,0,0.3,label)
+                fill_hist(t,40,0,1,label)
             ]))
 
-        dhj_labels = ["DH", "vis", "stable"]
-        dhj_nmax = [24.5, 199.5, 199.5]
-        dhj_nbin = [25, 50, 50]
-        for pre,label,nmax,nbin in zip(dhj_pre, dhj_labels,dhj_nmax,dhj_nbin):
-            hist_dict.update(chain.from_iterable([
-                fill_hist(f"{pre}Jet12_radius90",50,0,2,r"${\Delta}R_{90}(J_{JETIND}^{\text{"+label+"}})$"),
-                fill_hist(f"{pre}Jet12_radius95",50,0,2,r"${\Delta}R_{95}(J_{JETIND}^{\text{"+label+"}})$"),
-                fill_hist(f"{pre}Jet12_radius99",50,0,2,r"${\Delta}R_{99}(J_{JETIND}^{\text{"+label+"}})$"),
-                fill_hist(f"{pre}Jet12_girth",50,0,1,r"$g_{\text{jet}}(J_{JETIND}^{\text{"+label+"}})$"),
-                fill_hist(f"{pre}Jet12_nconst",nbin,-0.5,nmax,r"$n_{\text{const}}(J_{JETIND}^{\text{"+label+"}})$"),
-            ]))
+    # gen-level histograms
+
     hist_dict.update(chain.from_iterable([
-        fill_hist("Jet12_sdmass",50,0,150,r"$m_{\text{SD}}(J_{JETIND})$ [GeV]"),
-        fill_hist("Jet12_sdpt",50,0,mmed*0.75,r"$p^{\text{SD}}_{\text{T}}(J_{JETIND})$ [GeV]"),
         fill_hist("stable_invisible_fraction",25,0,1,r"$r_{\text{inv}}^{\text{gen}}$"),
         fill_hist("alpha_3body",50,0,1,r"$\alpha_{\text{3body}}$"),
         fill_hist("mMediator",50,0,mmed*1.5,r"$m_{\text{mediator}}$ [GeV]"),
+        fill_hist("DPJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{DP}})$ [GeV]"),
         fill_hist("DHJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{DH}})$ [GeV]"),
         fill_hist("DHVJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{vis}})$ [GeV]"),
         fill_hist("DHIVJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{stable}})$ [GeV]"),
@@ -524,14 +534,25 @@ def histogram(filename, helper, with_constituents=True, debug=False):
         fill_hist("DiDHVJet_MT",50,0,mmed*1.5,r"$m_{\text{T}}^{J^{\text{vis}}J^{\text{vis}}}$ [GeV]"),
         fill_hist("DiDHIVJet_mass",50,0,mmed*1.5,r"$m_{J^{\text{stable}}J^{\text{stable}}}$ [GeV]"),
     ]))
-
-    for t in events.fields:
-        if 'tau' not in t: continue
-        l = t.split('_')
-        label = l[1].replace('tau', '$\\tau_{')+','+l[0].replace('et12', '_{JETIND}')+'}$'
+    if with_constituents:
         hist_dict.update(chain.from_iterable([
-            fill_hist(t,40,0,1,label)
+            fill_hist("DHIVJet12_rinv_proj",25,0,1,r"$r_{\text{inv}}^{\text{kin}}(J_{JETIND}^{\text{stable}})$"),
+            fill_hist("DiDHIVJet_rinv_proj",25,0,1,r"$r_{\text{inv}}^{\text{kin}}(J^{\text{stable}}J^{\text{stable}})$"),
+            fill_hist("DHIVJet12_rinv_shape",25,0,1,r"$r_{\text{inv}}^{\text{kin(alt)}}(J_{JETIND}^{\text{stable}})$"),
+            fill_hist("DiDHIVJet_rinv_shape",25,0,1,r"$r_{\text{inv}}^{\text{kin(alt)}}(J^{\text{stable}}J^{\text{stable}})$"),
         ]))
+
+        dhj_labels = ["DP", "DH", "vis", "stable"]
+        dhj_nmax = [24.5, 24.5, 199.5, 199.5]
+        dhj_nbin = [25, 25, 50, 50]
+        for pre,label,nmax,nbin in zip(dhj_pre, dhj_labels,dhj_nmax,dhj_nbin):
+            hist_dict.update(chain.from_iterable([
+                fill_hist(f"{pre}Jet12_radius90",50,0,2,r"${\Delta}R_{90}(J_{JETIND}^{\text{"+label+"}})$"),
+                fill_hist(f"{pre}Jet12_radius95",50,0,2,r"${\Delta}R_{95}(J_{JETIND}^{\text{"+label+"}})$"),
+                fill_hist(f"{pre}Jet12_radius99",50,0,2,r"${\Delta}R_{99}(J_{JETIND}^{\text{"+label+"}})$"),
+                fill_hist(f"{pre}Jet12_girth",50,0,1,r"$g_{\text{jet}}(J_{JETIND}^{\text{"+label+"}})$"),
+                fill_hist(f"{pre}Jet12_nconst",nbin,-0.5,nmax,r"$n_{\text{const}}(J_{JETIND}^{\text{"+label+"}})$"),
+            ]))
 
     # finish output dictionary
     output["hist"] = hist_dict
@@ -541,7 +562,7 @@ def histogram(filename, helper, with_constituents=True, debug=False):
     if helper.mrho < 2*helper.mpi:
         from svjHelper import fcdc_rinv_3body, fcdc_rinv_3body_simp
         if helper.Ns is not None:
-            output["model"]['rinv_3body_gen'] = fcdc_rinv_3body(Nf=helper.Nf, Ns=helper.Ns, mrho=helper.mrho, mpi=helper.mpi, pvector=helper.pvector, alpha=meta_dict['alpha_3body']['mean'])
+            output["model"]['rinvpred_3body_gen'] = fcdc_rinv_3body(Nf=helper.Nf, Ns=helper.Ns, mrho=helper.mrho, mpi=helper.mpi, pvector=helper.pvector, alpha=meta_dict['alpha_3body']['mean'])
         else:
             output["model"]['rinv_3body_gen'] = fcdc_rinv_3body_simp(rinv=helper.rinv, Nf=helper.Nf, mrho=helper.mrho, mpi=helper.mpi, pvector=helper.pvector, alpha=meta_dict['alpha_3body']['mean'])
 
