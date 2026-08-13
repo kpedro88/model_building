@@ -190,7 +190,7 @@ def calc_rinv(events, helper, meta_dict, debug):
     if ak.any(is_dark_3body):
         pi_3body = events.GenParticle[is_dark_3body]
         rho_3body = events.GenParticle[m1[is_dark_3body]]
-        pi_3body_restframe = pi_3body.boostCM_of_beta3(rho_3body.to_beta3())
+        pi_3body_restframe = pi_3body.boostCM_of(rho_3body)
         E_pi_3body = pi_3body_restframe.energy
         m_rho_3body = rho_3body.mass
         alpha_3body = E_pi_3body/m_rho_3body

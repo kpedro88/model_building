@@ -31,6 +31,7 @@ Important software versions:
 * coffea 2025.12.0
 * uproot 5.7.5
 * awkward 2.10.0
+* vector 1.8.1
 * matplotlib 3.11.0
 * mplhep 1.3.2
 
