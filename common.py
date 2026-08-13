@@ -56,7 +56,7 @@ class DelphesSchema2(DelphesSchema):
 
     # avoid weird error when adding constituents
     def __init__(self, base_form):
-		# these two lists have to be kept in sync: zip, drop, unzip
+        # these two lists have to be kept in sync: zip, drop, unzip
         base_form["fields"], base_form["contents"] = zip(*[entry for entry in zip(base_form["fields"], base_form["contents"]) if not "fBits" in entry[0]])
         super().__init__(base_form)
 
@@ -132,7 +132,7 @@ def get_constituents_chunk(events, jetsname, candsname):
 def get_constituents(events, jetsname, candsname, chunk_size=500):
     outputs = []
 
-	# chunking avoids memory overusage
+    # chunking avoids memory overusage
     for start in range(0, len(events), chunk_size):
         stop = start + chunk_size
         chunk = events[start:stop]
@@ -263,9 +263,15 @@ def accumulate_data(samples):
             file = f'{model}/Hists.pkl'
             with open(file, "rb") as inp:
                 data_model = pickle.load(inp)
-                # track filename
-                data_model['file'] = file
-                data_model['meta'] = data_model['model'] | data_model['analysis']
+            file2 = f'{model}/Meta.pkl'
+            with open(file2, "rb") as inp:
+                metadict = pickle.load(inp)
+            # track filename
+            data_model['file'] = file
+            # merge dicts
+            data_model['model'].update(metadict)
+            # for convenience, combine model-based and derived metadata
+            data_model['meta'] = data_model['model'] | data_model['analysis']
 
             data[sample["name"]].append(data_model)
     return data

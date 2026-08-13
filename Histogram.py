@@ -265,7 +265,6 @@ def histogram(filename, helper, with_constituents=True, gen_only=False, debug=Fa
 
     # output dictionary with histograms and metadata
     output = {}
-    output["model"] = helper.metadata()
     meta_dict = {}
 
     # get rid of None Events
@@ -344,7 +343,8 @@ def histogram(filename, helper, with_constituents=True, gen_only=False, debug=Fa
     events["mMediator"] = meds_final.mass
 
     # Add the invisible fraction to the events
-    print(f"Predicted rinv = {output['model'].get('rinv_3body', output.get('rinvpred_3body', output['model'].get('rinv',output['model'].get('rinvpred', -1)))):.5}")
+    model = helper.metadata()
+    print(f"Predicted rinv = {model.get('rinv_3body', output.get('rinvpred_3body', model.get('rinv',model.get('rinvpred', -1)))):.5}")
     calc_rinv(events, helper, meta_dict, debug)
 
     # dark parton/hadron jets and corresponding visible and invisible+visible jets
@@ -557,6 +557,7 @@ def histogram(filename, helper, with_constituents=True, gen_only=False, debug=Fa
     # finish output dictionary
     output["hist"] = hist_dict
     output["analysis"] = meta_dict
+    output["model"] = {}
 
     # alternative 3body rinv calculation using alpha measured from Pythia
     if helper.mrho < 2*helper.mpi:
