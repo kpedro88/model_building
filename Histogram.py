@@ -92,6 +92,18 @@ def getECF(cluster_seq, npointECF):
     ecf = cluster_seq.exclusive_jets_energy_correlator(njets=1, npoint=npointECF, beta=1)
     return ecf
 
+def ak_isin(arr, allowed):
+    arr_ak = ak.Array(arr)
+    allowed_np = np.asarray(list(allowed))
+
+    def action(layout, **kwargs):
+        if layout.is_numpy:
+            data = ak.to_numpy(ak.Array(layout))
+            return ak.contents.NumpyArray(np.isin(data, allowed_np))
+        return None
+
+    return ak.transform(action, arr_ak)
+
 def calc_rinv(events, helper, meta_dict, debug):
     pid = events.GenParticle["PID"]
 
@@ -179,7 +191,7 @@ def calc_rinv(events, helper, meta_dict, debug):
         table_debug = make_table(mask=is_dark)
         import pandas as pd
         with pd.option_context('display.max_columns', None, 'display.max_rows', None, 'display.width', None, 'display.max_colwidth', None):
-            dprint(ak.to_pandas(table_debug))
+            dprint(ak.to_dataframe(table_debug))
 
     m1_dark_d_sm = m1_dark & (m1_d1_sm | m1_d2_sm)
     m2_dark_d_sm = m2_dark & (m2_d1_sm | m2_d2_sm)
@@ -195,6 +207,40 @@ def calc_rinv(events, helper, meta_dict, debug):
     dark_mother_sm_sibling = (m1_dark_d_sm) | (m2_dark_d_sm)
     dark_mother_sm_sibling = dark_mother_sm_sibling==1
     printer('dark_mother_sm_sibling',dark_mother_sm_sibling)
+
+    # counting in categories of decay behavior
+    events["n_pion"] = ak.sum(is_dark_initial_pion, axis=1)
+    maybe_pion_stable = (d1==-1) | ak_isin(pid[d1], stable_particle_ids)
+    initial_pion_stable = is_dark_initial_pion & maybe_pion_stable
+    events["n_pion_stable"] = ak.sum(initial_pion_stable, axis=1)
+    initial_pion_unstable = is_dark_initial_pion & ~maybe_pion_stable
+    events["n_pion_unstable"] = ak.sum(initial_pion_unstable, axis=1)
+    events["n_rho"] = ak.sum(is_dark_initial_rho, axis=1)
+    maybe_rho_pipi = (is_dark[d1]) & (is_dark[d2])
+    initial_rho_pipi = is_dark_initial_rho & maybe_rho_pipi
+    events["n_rho_pipi"] = ak.sum(initial_rho_pipi, axis=1)
+    maybe_rho_3body = ak_isin(pid[d1], dark_hadron_ids) ^ ak_isin(pid[d2], dark_hadron_ids)
+    initial_rho_3body = is_dark_initial_rho & maybe_rho_3body
+    events["n_rho_3body"] = ak.sum(initial_rho_3body, axis=1)
+    initial_rho_SM = (is_dark_initial_rho) & (~maybe_rho_pipi) & (~maybe_rho_3body)
+    events["n_rho_SM"] = ak.count(pid[initial_rho_SM], axis=1)
+
+    masks = {
+        'is_dark_initial_pion': is_dark_initial_pion,
+        'initial_pion_stable': initial_pion_stable,
+        'initial_pion_unstable': initial_pion_unstable,
+        'is_dark_initial_rho': is_dark_initial_rho,
+        'initial_rho_pipi': initial_rho_pipi,
+        'initial_rho_3body': initial_rho_3body,
+        'initial_rho_SM': initial_rho_SM,
+    }
+    if debug:
+        for mname,mask in masks.items():
+            table_debug = make_table(mask=mask)
+            import pandas as pd
+            with pd.option_context('display.max_columns', None, 'display.max_rows', None, 'display.width', None, 'display.max_colwidth', None):
+                dprint(mname)
+                dprint(ak.to_dataframe(table_debug))
 
     # quick diversion here to measure alpha = E_pi / m_rho for 3-body decays
     is_dark_3body = is_dark_final & dark_mother_sm_sibling
@@ -538,6 +584,13 @@ def histogram(filename, helper, with_constituents=True, gen_only=False, debug=Fa
         fill_hist("dark_pion_initial_pt",50,0,mmed*0.5,r"$p_{\text{T}}(\pi_{\text{initial}})$"),
         fill_hist("dark_rho_initial_pt",50,0,mmed*0.5,r"$p_{\text{T}}(\rho_{\text{initial}})$"),
         fill_hist("dark_rho_pion_initial_pt_ratio",50,0,4,r"$\langle p_{\text{T}}(\rho_{\text{initial}}) \rangle / \langle p_{\text{T}}(\pi_{\text{initial}}) \rangle$"),
+        fill_hist("n_pion",20,0,20,r"$n_{\pi}$"),
+        fill_hist("n_pion_stable",20,0,20,r"$n_{\pi}^{\text{stable}}$"),
+        fill_hist("n_pion_unstable",20,0,20,r"$n_{\pi}^{\text{unstable}}$"),
+        fill_hist("n_rho",20,0,20,r"$n_{\rho}$"),
+        fill_hist("n_rho_pipi",20,0,20,r"$n_{\rho}^{\pi\pi}$"),
+        fill_hist("n_rho_3body",20,0,20,r"$n_{\rho}^{\text{3body}}$"),
+        fill_hist("n_rho_SM",20,0,20,r"$n_{\rho}^{\text{SM}}$"),
         fill_hist("mMediator",50,0,mmed*1.5,r"$m_{\text{mediator}}$ [GeV]"),
         fill_hist("DPJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{DP}})$ [GeV]"),
         fill_hist("DHJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{DH}})$ [GeV]"),
