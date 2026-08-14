@@ -118,6 +118,7 @@ def calc_rinv(events, helper, meta_dict, debug):
     printer('is_dark',is_dark)
 
     # Boolean array of whether a particle is dark
+    # final: any dark hadron that doesn't decay to another dark hadron (predefined list from model)
     is_dark_final = ak.zeros_like(pid)
     for dhid in dark_hadron_final_ids:
         is_dark_final = is_dark_final | (np.abs(pid)==dhid)
@@ -136,6 +137,16 @@ def calc_rinv(events, helper, meta_dict, debug):
     m2_dark = (m2!=-1) & (is_dark[m2])
     m2_d1_sm = (d1[m2]!=-1) & (~is_dark[d1[m2]])
     m2_d2_sm = (d2[m2]!=-1) & (~is_dark[d2[m2]])
+
+    # Boolean array of whether a particle is dark
+    # initial: any dark hadron not resulting from another dark hadron
+    is_dark_initial = (is_dark) & (~m1_dark) & (~m2_dark)
+    printer('is_dark_initial',is_dark_initial)
+    is_dark_initial_pion = (is_dark_initial) & ( (pid % 10) == 1 )
+    is_dark_initial_rho = (is_dark_initial) & ( (pid % 10) == 3 )
+    events['dark_pion_initial_pt'] = events.GenParticle["PT"][is_dark_initial_pion]
+    events['dark_rho_initial_pt'] = events.GenParticle["PT"][is_dark_initial_rho]
+    events['dark_rho_pion_initial_pt_ratio'] = ak.mean(events['dark_rho_initial_pt'], axis=1) / ak.mean(events['dark_pion_initial_pt'], axis=1)
 
     def make_table(mask):
         table = ak.zip({
@@ -524,6 +535,9 @@ def histogram(filename, helper, with_constituents=True, gen_only=False, debug=Fa
     hist_dict.update(chain.from_iterable([
         fill_hist("stable_invisible_fraction",25,0,1,r"$r_{\text{inv}}^{\text{gen}}$"),
         fill_hist("alpha_3body",50,0,1,r"$\alpha_{\text{3body}}$"),
+        fill_hist("dark_pion_initial_pt",50,0,mmed*0.5,r"$p_{\text{T}}(\pi_{\text{initial}})$"),
+        fill_hist("dark_rho_initial_pt",50,0,mmed*0.5,r"$p_{\text{T}}(\rho_{\text{initial}})$"),
+        fill_hist("dark_rho_pion_initial_pt_ratio",50,0,4,r"$\langle p_{\text{T}}(\rho_{\text{initial}}) \rangle / \langle p_{\text{T}}(\pi_{\text{initial}}) \rangle$"),
         fill_hist("mMediator",50,0,mmed*1.5,r"$m_{\text{mediator}}$ [GeV]"),
         fill_hist("DPJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{DP}})$ [GeV]"),
         fill_hist("DHJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{DH}})$ [GeV]"),
