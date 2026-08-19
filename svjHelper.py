@@ -158,17 +158,20 @@ def fcdc_rinv_3body(*, Nf, Ns, mrho, mpi, pvector, alpha=None):
     rinv = (numer_pi + numer_rho) / (denom_pi + denom_rho)
     return rinv
 
-def fcdc_rinv_3body_simp(*, rinv, Nf, mrho, mpi, pvector, alpha=None):
+def fcdc_rinv_3body_simp(*, rinv, Nf, mrho, mpi, pvector, alpha=None, kappa=None):
     Npi = Nf**2-1 # neglect eta prime
     Nrho = Nf**2
 
     if alpha is None:
         alpha = alpha_mean(mrho=mrho, mpi=mpi)
 
+    if kappa is None:
+        kappa = mrho/mpi
+
     numer_pi = (1-pvector)*rinv*Npi
-    numer_rho = alpha*pvector*rinv*Nrho
+    numer_rho = alpha*kappa*pvector*rinv*Nrho
     denom_pi = (1-pvector)*Npi
-    denom_rho = pvector*Nrho
+    denom_rho = kappa*pvector*Nrho
 
     rinv_eff = (numer_pi + numer_rho) / (denom_pi + denom_rho)
     return rinv_eff

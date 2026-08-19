@@ -297,13 +297,14 @@ def calc_rinv(events, helper, meta_dict, debug):
     printer('is_dark_final',is_dark_final)
 
     # PIDs of dark daughter
-    dark_final_daughter = pid[d1[is_dark_final]]
-    is_dark_final_daughter = ak.zeros_like(dark_final_daughter) | (d1[is_dark_final]==-1)
-    printer('is_dark_final_daughter',is_dark_final_daughter)
-
+    is_dark_daughter = ak.zeros_like(pid) | (d1==-1)
     for dsid in stable_particle_ids:
-        printer(f'dark_final_daughter=={dsid}', (np.abs(dark_final_daughter)==dsid))
-        is_dark_final_daughter = is_dark_final_daughter | (np.abs(dark_final_daughter)==dsid)
+        printer(f'is_dark_daughter=={dsid}', (np.abs(pid[d1])==dsid))
+        is_dark_daughter = is_dark_daughter | (np.abs(pid[d1])==dsid)
+    is_dark_daughter = is_dark_daughter==1
+    printer('is_dark_daughter',is_dark_daughter)
+
+    is_dark_final_daughter = is_dark_final & is_dark_daughter
     printer('is_dark_final_daughter',is_dark_final_daughter)
 
     numer = ak.sum(is_dark_final_daughter, axis=1).to_numpy()
@@ -315,6 +316,29 @@ def calc_rinv(events, helper, meta_dict, debug):
     print(f"Average computed rinv value (pions) = {meta_dict['stable_invisible_fraction']['mean']:.5} ({meta_dict['stable_invisible_fraction']['stdev']:.5})")
 
     events["stable_invisible_fraction"] = stable_invisible_fraction
+
+    # kinematic rinv using DH frame
+    def fill_DHframe_rinv(numer, denom, suff):
+        events[f"DHframe_rinv_{suff}"] = ak.sum(numer, axis=-1)/ak.sum(denom, axis=-1)
+        meta_dict[f"DHframe_rinv_{suff}"] = fill_stats(events[f"DHframe_rinv_{suff}"])
+        print(f"Average DH frame rinv ({suff}) =",
+            f"{meta_dict[f'DHframe_rinv_{suff}']['mean']:.5} ({meta_dict[f'DHframe_rinv_{suff}']['stdev']:.5})"
+        )
+
+    events["stable_DHs"] = events["GenParticle"][is_dark_final_daughter]
+
+    # another sanity check
+    if debug:
+        print("GenParticle is_dark_final_daughter")
+        print_table(make_small_table(events["stable_DHs"]))
+
+    proj_numer = proj(events, "DHframe", "stable_DHs")
+    proj_denom = proj(events, "DHframe", "DarkHadronCandidate")
+    fill_DHframe_rinv(proj_numer, proj_denom, 'proj')
+
+    shape_numer = events["stable_DHs"].pt
+    shape_denom = events["DarkHadronCandidate"].pt
+    fill_DHframe_rinv(shape_numer, shape_denom, 'shape')
 
 def calc_mt(jet, met):
     # transverse mass calculation
@@ -441,7 +465,7 @@ def histogram(filename, helper, with_constituents=True, gen_only=False, debug=Fa
 
     # Add the invisible fraction to the events
     model = helper.metadata()
-    print(f"Predicted rinv = {model.get('rinv_3body', output.get('rinvpred_3body', model.get('rinv',model.get('rinvpred', -1)))):.5}")
+    print(f"Predicted rinv = {model.get('rinv_3body', model.get('rinvpred_3body', model.get('rinv',model.get('rinvpred', -1)))):.5}")
     calc_rinv(events, helper, meta_dict, debug)
 
     # dark parton/hadron jets and corresponding visible and invisible+visible jets
@@ -632,6 +656,8 @@ def histogram(filename, helper, with_constituents=True, gen_only=False, debug=Fa
         fill_hist("n_rho_pipi",20,0,20,r"$n_{\rho}^{\pi\pi}$"),
         fill_hist("n_rho_3body",20,0,20,r"$n_{\rho}^{\text{3body}}$"),
         fill_hist("n_rho_SM",20,0,20,r"$n_{\rho}^{\text{SM}}$"),
+        fill_hist("DHframe_rinv_proj",25,0,1,r"$r_{\text{inv}}^{\text{kin}}(\text{DH frame})$"),
+        fill_hist("DHframe_rinv_shape",25,0,1,r"$r_{\text{inv}}^{\text{kin(alt)}}(\text{DH frame})$"),
         fill_hist("mMediator",50,0,mmed*1.5,r"$m_{\text{mediator}}$ [GeV]"),
         fill_hist("DPJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{DP}})$ [GeV]"),
         fill_hist("DHJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{DH}})$ [GeV]"),
