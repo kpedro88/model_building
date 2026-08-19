@@ -33,7 +33,7 @@ Important software versions:
 * awkward 2.10.0
 * vector 1.8.1
 * matplotlib 3.11.0
-* mplhep 1.3.2
+* mplhep 1.3.3
 
 ## Predefined model configurations
 
