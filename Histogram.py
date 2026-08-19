@@ -123,18 +123,12 @@ def calc_rinv(events, helper, meta_dict, debug):
         dprint(f'{name:<30}',ak.sum(arr, axis=1).to_numpy().tolist())
 
     # Boolean array of whether a particle is dark
-    is_dark = ak.zeros_like(pid)
-    for dhid in dark_hadron_ids:
-        is_dark = is_dark | (np.abs(pid)==dhid)
-    is_dark = is_dark==1
+    is_dark = ak_isin(np.abs(pid), dark_hadron_ids)
     printer('is_dark',is_dark)
 
     # Boolean array of whether a particle is dark
     # final: any dark hadron that doesn't decay to another dark hadron (predefined list from model)
-    is_dark_final = ak.zeros_like(pid)
-    for dhid in dark_hadron_final_ids:
-        is_dark_final = is_dark_final | (np.abs(pid)==dhid)
-    is_dark_final = is_dark_final==1
+    is_dark_final = ak_isin(np.abs(pid), dark_hadron_final_ids)
     printer('is_dark_final',is_dark_final)
 
     # exclude dark hadrons resulting from mixed decay of another dark hadron
@@ -297,11 +291,7 @@ def calc_rinv(events, helper, meta_dict, debug):
     printer('is_dark_final',is_dark_final)
 
     # PIDs of dark daughter
-    is_dark_daughter = ak.zeros_like(pid) | (d1==-1)
-    for dsid in stable_particle_ids:
-        printer(f'is_dark_daughter=={dsid}', (np.abs(pid[d1])==dsid))
-        is_dark_daughter = is_dark_daughter | (np.abs(pid[d1])==dsid)
-    is_dark_daughter = is_dark_daughter==1
+    is_dark_daughter = (d1==-1) | ak_isin(np.abs(pid[d1]), stable_particle_ids)
     printer('is_dark_daughter',is_dark_daughter)
 
     is_dark_final_daughter = is_dark_final & is_dark_daughter
@@ -482,10 +472,7 @@ def histogram(filename, helper, with_constituents=True, gen_only=False, debug=Fa
         # per-jet calculation of invisible fraction based on momentum projection
         # pick out dark hadron constituents (stability already checked in Delphes)
         dark_hadron_final_ids = helper.darkHadronFinalIDs
-        is_dark = ak.zeros_like(events["DHIVJet12"].Constituents.PID)
-        for dhid in dark_hadron_final_ids:
-            is_dark = is_dark | (np.abs(events["DHIVJet12"].Constituents.PID)==dhid)
-        is_dark = is_dark==1
+        is_dark = ak_isin(np.abs(events["DHIVJet12"].Constituents.PID), dark_hadron_final_ids)
         events["DHIVJet12", "DHConstituents"] = events["DHIVJet12", "Constituents"][is_dark]
 
         def fill_DHIVJet_rinv(numer, denom, suff):
