@@ -4,8 +4,8 @@ import numpy as np
 import numba as nb
 from numpy.typing import NDArray
 import awkward as ak
-from coffea.nanoevents.methods import vector
-from coffea.nanoevents.methods.delphes import behavior, _set_repr_name, Particle
+import vector as vec
+from coffea.nanoevents.methods.delphes import behavior
 import matplotlib as mpl
 import fnmatch
 import shutil
@@ -54,10 +54,12 @@ class DelphesSchema2(DelphesSchema):
         "GenJet" : "GenCandidate",
     }
 
-    # avoid weird error when adding constituents
     def __init__(self, base_form):
+        # avoid weird error when adding constituents
         # these two lists have to be kept in sync: zip, drop, unzip
         base_form["fields"], base_form["contents"] = zip(*[entry for entry in zip(base_form["fields"], base_form["contents"]) if not "fBits" in entry[0]])
+        # enable using ak.sum on derived class
+        behavior[ak.sum, "Particle"] = vec.backends.awkward.behavior[ak.sum, "Momentum4D"]
         super().__init__(base_form)
 
 # ignore unnecessary warning

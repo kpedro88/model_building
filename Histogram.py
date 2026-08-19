@@ -154,8 +154,8 @@ def calc_rinv(events, helper, meta_dict, debug):
     # initial: any dark hadron not resulting from another dark hadron
     is_dark_initial = (is_dark) & (~m1_dark) & (~m2_dark)
     printer('is_dark_initial',is_dark_initial)
-    is_dark_initial_pion = (is_dark_initial) & ( (pid % 10) == 1 )
-    is_dark_initial_rho = (is_dark_initial) & ( (pid % 10) == 3 )
+    is_dark_initial_pion = (is_dark_initial) & ( (np.abs(pid) % 10) == 1 )
+    is_dark_initial_rho = (is_dark_initial) & ( (np.abs(pid) % 10) == 3 )
     events['dark_pion_initial_pt'] = events.GenParticle["PT"][is_dark_initial_pion]
     events['dark_rho_initial_pt'] = events.GenParticle["PT"][is_dark_initial_rho]
     events['dark_rho_pion_initial_pt_ratio'] = ak.mean(events['dark_rho_initial_pt'], axis=1) / ak.mean(events['dark_pion_initial_pt'], axis=1)
@@ -186,12 +186,15 @@ def calc_rinv(events, helper, meta_dict, debug):
         })
         return table
 
+    def print_table(table):
+        import pandas as pd
+        with pd.option_context('display.max_columns', None, 'display.max_rows', None, 'display.width', None, 'display.max_colwidth', None):
+            print(ak.to_dataframe(table))
+
     # for debugging, show only dark hadron entries
     if debug:
         table_debug = make_table(mask=is_dark)
-        import pandas as pd
-        with pd.option_context('display.max_columns', None, 'display.max_rows', None, 'display.width', None, 'display.max_colwidth', None):
-            dprint(ak.to_dataframe(table_debug))
+        print_table(table_debug)
 
     m1_dark_d_sm = m1_dark & (m1_d1_sm | m1_d2_sm)
     m2_dark_d_sm = m2_dark & (m2_d1_sm | m2_d2_sm)
@@ -210,7 +213,7 @@ def calc_rinv(events, helper, meta_dict, debug):
 
     # counting in categories of decay behavior
     events["n_pion"] = ak.sum(is_dark_initial_pion, axis=1)
-    maybe_pion_stable = (d1==-1) | ak_isin(pid[d1], stable_particle_ids)
+    maybe_pion_stable = (d1==-1) | ak_isin(np.abs(pid[d1]), stable_particle_ids)
     initial_pion_stable = is_dark_initial_pion & maybe_pion_stable
     events["n_pion_stable"] = ak.sum(initial_pion_stable, axis=1)
     initial_pion_unstable = is_dark_initial_pion & ~maybe_pion_stable
@@ -219,7 +222,7 @@ def calc_rinv(events, helper, meta_dict, debug):
     maybe_rho_pipi = (is_dark[d1]) & (is_dark[d2])
     initial_rho_pipi = is_dark_initial_rho & maybe_rho_pipi
     events["n_rho_pipi"] = ak.sum(initial_rho_pipi, axis=1)
-    maybe_rho_3body = ak_isin(pid[d1], dark_hadron_ids) ^ ak_isin(pid[d2], dark_hadron_ids)
+    maybe_rho_3body = ak_isin(np.abs(pid[d1]), dark_hadron_ids) ^ ak_isin(np.abs(pid[d2]), dark_hadron_ids)
     initial_rho_3body = is_dark_initial_rho & maybe_rho_3body
     events["n_rho_3body"] = ak.sum(initial_rho_3body, axis=1)
     initial_rho_SM = (is_dark_initial_rho) & (~maybe_rho_pipi) & (~maybe_rho_3body)
@@ -258,6 +261,38 @@ def calc_rinv(events, helper, meta_dict, debug):
         events["alpha_3body"] = ak.Array([0])
         meta_dict["alpha_3body"] = fill_stats(events["alpha_3body"])
 
+    def make_small_table(coll):
+        table = ak.zip({
+            "fUniqueID": coll["fUniqueID"],
+            "PID": coll["PID"],
+            "M1": coll["M1"],
+            "M2": coll["M2"],
+            "D1": coll["D1"],
+            "D2": coll["D2"],
+            "PT": coll["PT"],
+        })
+        return table
+
+    # construct hadronization frame (four-momentum sum of all initial state hadrons)
+    # to measure kappa = E_rho / E_pi
+    events["DHframe"] = ak.sum(events["DarkHadronCandidate"], axis=1)
+
+    # sanity check between Delphes and offline selections of initial dark hadrons
+    if debug:
+        print("DarkHadronCandidate")
+        print_table(make_small_table(events["DarkHadronCandidate"]))
+        print("GenParticle is_dark_initial")
+        print_table(make_small_table(events["GenParticle"][is_dark_initial_rho | is_dark_initial_pion]))
+
+    proj_rho = proj(events, "DHframe", ["GenParticle", is_dark_initial_rho])
+    E_rho = ak.sum(proj_rho, axis=1) / ak.sum(is_dark_initial_rho, axis=1)
+    proj_pion = proj(events, "DHframe", ["GenParticle", is_dark_initial_pion])
+    E_pion = ak.sum(proj_pion, axis=1) / ak.sum(is_dark_initial_pion, axis=1)
+    kappa = E_rho / E_pion
+    meta_dict["kappa"] = fill_stats(kappa)
+    print(f"Average kappa = {meta_dict['kappa']['mean']:.3} ({meta_dict['kappa']['stdev']:.3})")
+    events["kappa"] = kappa
+
     is_dark_final = is_dark_final & ~dark_mother_sm_sibling
     printer('is_dark_final',is_dark_final)
 
@@ -289,8 +324,13 @@ def calc_mt(jet, met):
     MTsq = MTsq.to_numpy(allow_missing=True)
     return np.sqrt(MTsq, where=MTsq>=0)
 
-def proj(events, jet, const):
-    return events[jet, const].dot(events[jet]) / events[jet].mass
+def proj(events, a, b):
+    if not isinstance(a, list): a = [a]
+    if not isinstance(b, list): b = [b]
+    return events[tuple(b)].dot(events[tuple(a)]) / events[tuple(a)].mass
+
+def proj_jet(events, jet, const):
+    return proj(events, jet, [jet, const])
 
 def jet_const_cumsum(array):
     counts = ak.num(array, axis=-1)
@@ -445,8 +485,8 @@ def histogram(filename, helper, with_constituents=True, gen_only=False, debug=Fa
             )
 
         # project constituent momentum onto jet axis
-        proj_numer = proj(events, "DHIVJet12", "DHConstituents")
-        proj_denom = proj(events, "DHIVJet12", "Constituents")
+        proj_numer = proj_jet(events, "DHIVJet12", "DHConstituents")
+        proj_denom = proj_jet(events, "DHIVJet12", "Constituents")
         fill_DHIVJet_rinv(proj_numer, proj_denom, 'proj')
 
         # alternative: use scalar pT sum (related to "jet shape" below)
@@ -581,6 +621,7 @@ def histogram(filename, helper, with_constituents=True, gen_only=False, debug=Fa
     hist_dict.update(chain.from_iterable([
         fill_hist("stable_invisible_fraction",25,0,1,r"$r_{\text{inv}}^{\text{gen}}$"),
         fill_hist("alpha_3body",50,0,1,r"$\alpha_{\text{3body}}$"),
+        fill_hist("kappa",50,0,5,r"$\kappa$"),
         fill_hist("dark_pion_initial_pt",50,0,mmed*0.5,r"$p_{\text{T}}(\pi_{\text{initial}})$"),
         fill_hist("dark_rho_initial_pt",50,0,mmed*0.5,r"$p_{\text{T}}(\rho_{\text{initial}})$"),
         fill_hist("dark_rho_pion_initial_pt_ratio",50,0,4,r"$\langle p_{\text{T}}(\rho_{\text{initial}}) \rangle / \langle p_{\text{T}}(\pi_{\text{initial}}) \rangle$"),
