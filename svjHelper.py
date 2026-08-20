@@ -36,10 +36,12 @@ def gchi_lhcdm(*, gDM, Nc, Nf):
     return gDM/math.sqrt(Nc*Nf)
 
 # rinv calculation for FCDC complete model
-# neglects eta prime meson: assumed to be heavy (from anomaly), therefore rarely produced
-def fcdc_rinv(*, Nf, Ns):
+# by default, neglect eta prime meson: assumed to be heavy (from anomaly), therefore rarely produced
+def fcdc_rinv(*, Nf, Ns, keepEta1=False):
     Nu = Nf-Ns
-    rinv = (Nf*(Nf-1) - Nu*(Nu-1)) / (Nf**2 - 1)
+    Nstable = Nf*(Nf-1) - Nu*(Nu-1)
+    Npi = Nf**2 - (1-int(keepEta1)) # neglect eta prime
+    rinv = Nstable/Npi
     return rinv
 
 # create a single fcdc config using input numbers
@@ -137,14 +139,14 @@ def alpha_mean(*, mrho, mpi):
     alpha = np.mean(alphas)
     return alpha
 
-def fcdc_rinv_3body(*, Nf, Ns, mrho, mpi, pvector, alpha=None, kappa=None):
+def fcdc_rinv_3body(*, Nf, Ns, mrho, mpi, pvector, alpha=None, kappa=None, keepEta1=False):
     # off-diagonal pi w/ no FCDC: stable
     # off-diagonal rho w/ no FCDC: decay to pi q qbar (pi stable)
     # all others decay to q qbar (mass insertion or democratic)
 
     Nu = Nf-Ns
     Nstable = Nf*(Nf-1) - Nu*(Nu-1)
-    Npi = Nf**2-1 # neglect eta prime
+    Npi = Nf**2 - (1-int(keepEta1)) # neglect eta prime
     Nrho = Nf**2
 
     if alpha is None:
@@ -161,8 +163,8 @@ def fcdc_rinv_3body(*, Nf, Ns, mrho, mpi, pvector, alpha=None, kappa=None):
     rinv = (numer_pi + numer_rho) / (denom_pi + denom_rho)
     return rinv
 
-def fcdc_rinv_3body_simp(*, rinv, Nf, mrho, mpi, pvector, alpha=None, kappa=None):
-    Npi = Nf**2-1 # neglect eta prime
+def fcdc_rinv_3body_simp(*, rinv, Nf, mrho, mpi, pvector, alpha=None, kappa=None, keepEta1=False):
+    Npi = Nf**2 - (1-int(keepEta1)) # neglect eta prime
     Nrho = Nf**2
 
     if alpha is None:
@@ -386,8 +388,8 @@ class darkHadron():
             sign2 = 1 if n > antiDarkQuarkFromRho else -1
             meson1 = sign1 * self.getDarkMeson(dq=n, adq=darkQuarkFromRho, spin=0)
             meson2 = sign2 * self.getDarkMeson(dq=n, adq=antiDarkQuarkFromRho, spin=0)
-            # etaPrime taken to be heavy (probKeepEta1=0), so exclude from allowed decays
-            if abs(meson1)==etaPrime or abs(meson2)==etaPrime:
+            # if etaPrime taken to be heavy (probKeepEta1=0), exclude from allowed decays
+            if not self.helper.keepEta1 and (abs(meson1)==etaPrime or abs(meson2)==etaPrime):
                 continue
             allowed.append(
                 (meson1, meson2)
@@ -468,7 +470,7 @@ class hvSpectrum():
             '4900111:antiName = pivDiagbar',
             '4900113:antiName = rhovDiagbar',
             # disable eta prime production: Nf^2-1 accessible states
-            'HiddenValley:probKeepEta1 = 0',
+            f'HiddenValley:probKeepEta1 = {int(self.helper.keepEta1)}',
         ]
 
     # helper for common dark quark/hadron lines in separateFlav setup
@@ -476,7 +478,7 @@ class hvSpectrum():
         lines = [
             'HiddenValley:separateFlav = on',
             # disable eta prime production: Nf^2-1 accessible states
-            'HiddenValley:probKeepEta1 = 0',
+            f'HiddenValley:probKeepEta1 = {int(self.helper.keepEta1)}',
         ]
         # for separateFlav=on, set masses of all the dark quarks
         for dq in self.darkQuarks:
@@ -724,6 +726,7 @@ class svjHelper(baseHelper):
 
     def __init__(self,args):
         super().__init__(args)
+        self.keepEta1 = False
 
         # sanity checks
         if self.mrho is None: self.mrho = self.mpi
@@ -731,7 +734,7 @@ class svjHelper(baseHelper):
             if self.rinv<0 or self.rinv>1:
                 raise ValueError(f'rinv {self.rinv} not allowed (0 <= rinv <= 1)')
         if self.Nf is not None and self.Ns is not None:
-            self.rinvpred = fcdc_rinv(Nf = self.Nf, Ns = self.Ns)
+            self.rinvpred = fcdc_rinv(Nf = self.Nf, Ns = self.Ns, keepEta1 = self.keepEta1)
 
         # set up spectrum
         self.spectrumHelper = hvSpectrum(self.spectrum, self)
@@ -778,10 +781,10 @@ class svjHelper(baseHelper):
         metadict["darkHadronFinalIDs"] = self.darkHadronFinalIDs
         if self.rinv is not None:
             if self.mrho < 2*self.mpi:
-                metadict["rinv_3body"] = fcdc_rinv_3body_simp(rinv=self.rinv, Nf=self.Nf, mrho=self.mrho, mpi=self.mpi, pvector=self.pvector)
+                metadict["rinv_3body"] = fcdc_rinv_3body_simp(rinv=self.rinv, Nf=self.Nf, mrho=self.mrho, mpi=self.mpi, pvector=self.pvector, keepEta1=self.keepEta1)
         if self.Ns is not None:
             if self.mrho < 2*self.mpi:
-                metadict["rinvpred_3body"] = fcdc_rinv_3body(Nf=self.Nf, Ns=self.Ns, mrho=self.mrho, mpi=self.mpi, pvector=self.pvector)
+                metadict["rinvpred_3body"] = fcdc_rinv_3body(Nf=self.Nf, Ns=self.Ns, mrho=self.mrho, mpi=self.mpi, pvector=self.pvector, keepEta1=self.keepEta1)
         return metadict
 
     def getPythiaSettings(self):
