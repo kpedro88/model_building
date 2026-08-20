@@ -104,6 +104,27 @@ def ak_isin(arr, allowed):
 
     return ak.transform(action, arr_ak)
 
+def mask_pion(coll):
+    return (np.abs(coll) % 10) == 1
+
+def mask_rho(coll):
+    return (np.abs(coll) % 10) == 3
+
+# split B particles into groups based on the A particle to which they are closest
+def partition_particles(A, B):
+    # compute delta R for all pairs
+    dr = A.metric_table(B)
+    # index of the nearest A for each B; keepdims -> (events, 1, n_B)
+    nearest = ak.argmin(dr, axis=1, keepdims=True)
+    # A-row index at every cell, shape (events, n_A, n_B)
+    a_idx = ak.local_index(dr, axis=1)
+    # True where this A is the closest one to that B
+    mask = a_idx == nearest
+    # broadcast B across the A axis, then filter with the mask
+    B_bcast = ak.broadcast_arrays(dr, B[:, np.newaxis])[1]
+    grouped = B_bcast[mask] # -> (events, n_A, var)
+    return grouped
+
 def calc_rinv(events, helper, meta_dict, debug):
     pid = events.GenParticle["PID"]
 
@@ -148,8 +169,8 @@ def calc_rinv(events, helper, meta_dict, debug):
     # initial: any dark hadron not resulting from another dark hadron
     is_dark_initial = (is_dark) & (~m1_dark) & (~m2_dark)
     printer('is_dark_initial',is_dark_initial)
-    is_dark_initial_pion = (is_dark_initial) & ( (np.abs(pid) % 10) == 1 )
-    is_dark_initial_rho = (is_dark_initial) & ( (np.abs(pid) % 10) == 3 )
+    is_dark_initial_pion = (is_dark_initial) & mask_pion(pid)
+    is_dark_initial_rho = (is_dark_initial) & mask_rho(pid)
     events['dark_pion_initial_pt'] = events.GenParticle["PT"][is_dark_initial_pion]
     events['dark_rho_initial_pt'] = events.GenParticle["PT"][is_dark_initial_rho]
     events['dark_rho_pion_initial_pt_ratio'] = ak.mean(events['dark_rho_initial_pt'], axis=1) / ak.mean(events['dark_pion_initial_pt'], axis=1)
@@ -267,21 +288,35 @@ def calc_rinv(events, helper, meta_dict, debug):
         })
         return table
 
-    # construct hadronization frame (four-momentum sum of all initial state hadrons)
-    # to measure kappa = E_rho / E_pi
-    events["DHframe"] = ak.sum(events["DarkHadronCandidate"], axis=1)
-
     # sanity check between Delphes and offline selections of initial dark hadrons
+    events["DHinitial"] = events["GenParticle"][is_dark_initial_rho | is_dark_initial_pion]
     if debug:
         print("DarkHadronCandidate")
         print_table(make_small_table(events["DarkHadronCandidate"]))
         print("GenParticle is_dark_initial")
-        print_table(make_small_table(events["GenParticle"][is_dark_initial_rho | is_dark_initial_pion]))
+        print_table(make_small_table(events["DHinitial"]))
 
-    proj_rho = proj(events, "DHframe", ["GenParticle", is_dark_initial_rho])
-    E_rho = ak.sum(proj_rho, axis=1) / ak.sum(is_dark_initial_rho, axis=1)
-    proj_pion = proj(events, "DHframe", ["GenParticle", is_dark_initial_pion])
-    E_pion = ak.sum(proj_pion, axis=1) / ak.sum(is_dark_initial_pion, axis=1)
+    # find initial dark quarks
+    dark_quark_ids = helper.darkQuarkIDs
+    dprint('dark_quark_ids',dark_quark_ids)
+    dark_parton_ids = helper.darkPartonIDs
+    dprint('dark_parton_ids',dark_parton_ids)
+    is_dark_quark = ak_isin(np.abs(pid), dark_quark_ids)
+    is_dark_parton = ak_isin(np.abs(pid), dark_parton_ids)
+    m1_dark_parton = (m1!=-1) & (is_dark_parton[m1])
+    m2_dark_parton = (m2!=-1) & (is_dark_parton[m2])
+    is_dark_quark_initial = is_dark_quark & ~m1_dark_parton & ~m2_dark_parton
+    dark_quark_initial = events["GenParticle"][is_dark_quark_initial]
+
+    # for each dark hadron, find closest dark quark, and group by assignment
+    events["DHgrouped"] = partition_particles(dark_quark_initial, events["DHinitial"])
+    # create frames: sum dark hadron four-momenta (grouped by dark quarks)
+    events["DQframe"] = ak.sum(events["DHgrouped"], axis=2)
+    # projections
+    proj_rho = proj(events, "DQframe", ["DHgrouped", mask_rho(events["DHgrouped"].PID)])
+    E_rho = ak.sum(ak.flatten(proj_rho, axis=2), axis=1) / ak.sum(is_dark_initial_rho, axis=1)
+    proj_pion = proj(events, "DQframe", ["DHgrouped", mask_pion(events["DHgrouped"].PID)])
+    E_pion = ak.sum(ak.flatten(proj_pion, axis=2), axis=1) / ak.sum(is_dark_initial_pion, axis=1)
     kappa = E_rho / E_pion
     meta_dict["kappa"] = fill_stats(kappa)
     print(f"Average kappa = {meta_dict['kappa']['mean']:.3} ({meta_dict['kappa']['stdev']:.3})")
@@ -297,6 +332,11 @@ def calc_rinv(events, helper, meta_dict, debug):
     is_dark_final_daughter = is_dark_final & is_dark_daughter
     printer('is_dark_final_daughter',is_dark_final_daughter)
 
+    # another sanity check
+    if debug:
+        print("GenParticle is_dark_final_daughter")
+        print_table(make_small_table(events["GenParticle"][is_dark_final_daughter]))
+
     numer = ak.sum(is_dark_final_daughter, axis=1).to_numpy()
     denom = ak.sum(is_dark_final, axis=1).to_numpy()
     with np.errstate(divide='ignore', invalid='ignore'):
@@ -306,29 +346,6 @@ def calc_rinv(events, helper, meta_dict, debug):
     print(f"Average computed rinv value (pions) = {meta_dict['stable_invisible_fraction']['mean']:.5} ({meta_dict['stable_invisible_fraction']['stdev']:.5})")
 
     events["stable_invisible_fraction"] = stable_invisible_fraction
-
-    # kinematic rinv using DH frame
-    def fill_DHframe_rinv(numer, denom, suff):
-        events[f"DHframe_rinv_{suff}"] = ak.sum(numer, axis=-1)/ak.sum(denom, axis=-1)
-        meta_dict[f"DHframe_rinv_{suff}"] = fill_stats(events[f"DHframe_rinv_{suff}"])
-        print(f"Average DH frame rinv ({suff}) =",
-            f"{meta_dict[f'DHframe_rinv_{suff}']['mean']:.5} ({meta_dict[f'DHframe_rinv_{suff}']['stdev']:.5})"
-        )
-
-    events["stable_DHs"] = events["GenParticle"][is_dark_final_daughter]
-
-    # another sanity check
-    if debug:
-        print("GenParticle is_dark_final_daughter")
-        print_table(make_small_table(events["stable_DHs"]))
-
-    proj_numer = proj(events, "DHframe", "stable_DHs")
-    proj_denom = proj(events, "DHframe", "DarkHadronCandidate")
-    fill_DHframe_rinv(proj_numer, proj_denom, 'proj')
-
-    shape_numer = events["stable_DHs"].pt
-    shape_denom = events["DarkHadronCandidate"].pt
-    fill_DHframe_rinv(shape_numer, shape_denom, 'shape')
 
 def calc_mt(jet, met):
     # transverse mass calculation
@@ -643,8 +660,6 @@ def histogram(filename, helper, with_constituents=True, gen_only=False, debug=Fa
         fill_hist("n_rho_pipi",20,0,20,r"$n_{\rho}^{\pi\pi}$"),
         fill_hist("n_rho_3body",20,0,20,r"$n_{\rho}^{\text{3body}}$"),
         fill_hist("n_rho_SM",20,0,20,r"$n_{\rho}^{\text{SM}}$"),
-        fill_hist("DHframe_rinv_proj",25,0,1,r"$r_{\text{inv}}^{\text{kin}}(\text{DH frame})$"),
-        fill_hist("DHframe_rinv_shape",25,0,1,r"$r_{\text{inv}}^{\text{kin(alt)}}(\text{DH frame})$"),
         fill_hist("mMediator",50,0,mmed*1.5,r"$m_{\text{mediator}}$ [GeV]"),
         fill_hist("DPJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{DP}})$ [GeV]"),
         fill_hist("DHJet12_pt",50,0,mmed*0.75,r"$p_{\text{T}}(J_{JETIND}^{\text{DH}})$ [GeV]"),
