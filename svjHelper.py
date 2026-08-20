@@ -449,9 +449,11 @@ class darkHadron():
 
 class hvSpectrum():
     def __init__(self, name, helper):
-        self.customLines = []
-        self.darkHadrons = []
         self.helper = helper
+        self.customLines = []
+        self.darkGluons = [4900021]
+        self.darkQuarks = [int(f'490010{i}') for i in range(1, self.helper.Nf+1)]
+        self.darkHadrons = []
 
         if not hasattr(self, name+'Spectrum'):
             raise ValueError("unknown spectrum {}".format(name))
@@ -461,7 +463,7 @@ class hvSpectrum():
     def quarkLines(self):
         return [
             # fermionic dark quark
-            '4900101:m0 = {:g}'.format(self.helper.mq),
+            f'4900101:m0 = {self.helper.mq:g}',
             # define missing antiparticles
             '4900111:antiName = pivDiagbar',
             '4900113:antiName = rhovDiagbar',
@@ -477,8 +479,8 @@ class hvSpectrum():
             'HiddenValley:probKeepEta1 = 0',
         ]
         # for separateFlav=on, set masses of all the dark quarks
-        for i in range(1, self.helper.Nf+1):
-            lines.append('490010{:d}:m0 = {:g}'.format(i, self.helper.mq))
+        for dq in self.darkQuarks:
+            lines.append(f'{dq}:m0 = {self.helper.mq:g}')
 
         return lines
 
@@ -612,10 +614,8 @@ class hvChannel():
         ]
 
         # divide up Z' BF between the Nf quarks
-        dark_quarks = []
-        for i in range(1, self.helper.Nf+1):
-            dq = f'490010{i}'
-            dark_quarks.append(dq)
+        darkQuarks = self.helper.spectrumHelper.darkQuarks
+        for i,dq in enumerate(darkQuarks):
             if i==1: line = f'{self.mediatorID}:oneChannel = 1 {Bchi:3f} 102 {dq} -{dq}'
             else: line = f'{self.mediatorID}:addChannel = 1 {Bchi:3f} 102 {dq} -{dq}'
             self.customLines.append(line)
@@ -628,7 +628,7 @@ class hvChannel():
         # only save events with Zprime -> dark quarks
         self.customLines.extend([
             f'{self.mediatorID}:onMode = off',
-            f'{self.mediatorID}:onIfAny = {" ".join(dark_quarks)}',
+            f'{self.mediatorID}:onIfAny = {" ".join([f"{dq}" for dq in darkQuarks])}',
         ])
 
         # decouple t-channel mediator particles
@@ -679,16 +679,18 @@ class baseHelper():
             return ids + [-1*id for id in ids]
 
         def pdg_lines(ids):
-            return ["  add PdgCode {{{}}}".format(id) for id in ids]
+            return '\n'.join(["  add PdgCode {{{}}}".format(id) for id in ids])
 
         HVEnergyFractions = '\n'.join(["  add EnergyFraction {{{}}} {{0}}".format(id) for id in self.stableIDs])
         stableIDs_with_neg = add_neg(self.stableIDs)
-        HVNuFilter = '\n'.join(pdg_lines(stableIDs_with_neg))
+        HVNuFilter = pdg_lines(stableIDs_with_neg)
         HVDaughterFilter = HVNuFilter.replace("PdgCode", "PdgDaughter")
         darkHadronIDs_with_neg = add_neg(self.darkHadronIDs)
-        HVDarkHadronFilter = '\n'.join(pdg_lines(darkHadronIDs_with_neg))
+        HVDarkHadronFilter = pdg_lines(darkHadronIDs_with_neg)
         darkHadronFinalIDs_with_neg = add_neg(self.darkHadronFinalIDs)
-        HVDarkHadronFinalFilter = '\n'.join(pdg_lines(darkHadronFinalIDs_with_neg))
+        HVDarkHadronFinalFilter = pdg_lines(darkHadronFinalIDs_with_neg)
+        darkPartonIDs_with_neg = add_neg(self.darkPartonIDs)
+        HVDarkPartonFilter = pdg_lines(darkPartonIDs_with_neg)
 
         with input.open() as infile:
             old_lines = Template(infile.read())
@@ -698,6 +700,7 @@ class baseHelper():
                 HVDarkHadronFilter = HVDarkHadronFilter,
                 HVDaughterFilter = HVDaughterFilter,
                 HVDarkHadronFinalFilter = HVDarkHadronFinalFilter,
+                HVDarkPartonFilter = HVDarkPartonFilter,
             )
         return new_lines
 
@@ -730,11 +733,6 @@ class svjHelper(baseHelper):
         if self.Nf is not None and self.Ns is not None:
             self.rinvpred = fcdc_rinv(Nf = self.Nf, Ns = self.Ns)
 
-        # set up production channel
-        self.channelHelper = hvChannel(self.channel, self)
-        self.channelLines = self.channelHelper.customLines
-        self.mediatorID = self.channelHelper.mediatorID
-
         # set up spectrum
         self.spectrumHelper = hvSpectrum(self.spectrum, self)
         self.spectrumLines = self.spectrumHelper.customLines
@@ -742,6 +740,13 @@ class svjHelper(baseHelper):
         self.darkHadronIDs = [dh.id for dh in self.spectrumParticles if not dh.placeholder]
         self.darkHadronFinalIDs = [dh.id for dh in self.spectrumParticles if not dh.placeholder and 'darkRho' not in dh.decay]
         self.stableIDs = [dh.id for dh in self.spectrumParticles if dh.decay=='stable']
+
+        # set up production channel
+        self.channelHelper = hvChannel(self.channel, self)
+        self.channelLines = self.channelHelper.customLines
+        self.mediatorID = self.channelHelper.mediatorID
+        self.darkQuarkIDs = self.spectrumHelper.darkQuarks
+        self.darkPartonIDs = self.darkQuarkIDs + self.spectrumHelper.darkGluons
 
         # metadata tracking
         self.always_included = ["channel","mmed","Nc","Nf","scale","mq","mpi","mrho","pvector","spectrum","gq","gchi"]
@@ -766,6 +771,8 @@ class svjHelper(baseHelper):
     def metadata(self):
         metadict = {param:getattr(self,param) for param in self.always_included}
         metadict.update({param:getattr(self,param) for param in self.maybe_included+self.meta_included if getattr(self,param,None) is not None})
+        metadict["darkQuarkIDs"] = self.darkQuarkIDs
+        metadict["darkPartonIDs"] = self.darkPartonIDs
         metadict["stableIDs"] = self.stableIDs
         metadict["darkHadronIDs"] = self.darkHadronIDs
         metadict["darkHadronFinalIDs"] = self.darkHadronFinalIDs
@@ -800,6 +807,8 @@ class extHelper(baseHelper):
     @staticmethod
     def add_arguments(parser):
         parser.add_argument("--card", type=str, required=True, help="external Pythia card")
+        parser.add_argument("--darkQuarkIDs", type=int, nargs='*', default=[4900101], help="list of dark quark PDG IDs")
+        parser.add_argument("--darkGluonIDs", type=int, nargs='*', default=[4900021], help="list of dark gluon PDG IDs")
         parser.add_argument("--stableIDs", type=int, nargs='*', default=[], help="list of stable PDG IDs")
         parser.add_argument("--darkHadronIDs", type=int, nargs='*', default=[], help="list of dark hadron PDG IDs")
         parser.add_argument("--darkHadronFinalIDs", type=int, nargs='*', default=[], help="list of final dark hadron PDG IDs")
@@ -813,6 +822,8 @@ class extHelper(baseHelper):
 
     def metadata(self):
         metadict = {}
+        metadict["darkQuarkIDs"] = self.darkQuarkIDs
+        metadict["darkGluonIDs"] = self.darkQuarkIDs + self.darkGluonIDs
         metadict["stableIDs"] = self.stableIDs
         metadict["darkHadronIDs"] = self.darkHadronIDs
         metadict["darkHadronFinalIDs"] = self.darkHadronFinalIDs

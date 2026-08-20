@@ -71,6 +71,7 @@ An external Pythia card can be used (instead of generating a model by providing 
 ```
 
 As shown, the lists of stable particle IDs, dark hadron IDs, and final dark hadron IDs must be provided manually in order for the Delphes output to be correct.
+The lists of dark quark and dark gluon IDs (via `--darkQuarkIDs` and `--darkGluonIDs`) should also be updated if relevant; the default values are `[4900101]` and `[4900021]`, respectively.
 (The argument `--pythia ''` prevents appending common settings to the Pythia card, which are included by default.)
 
 ## Analysis
