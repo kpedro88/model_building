@@ -166,7 +166,6 @@ def fcdc_rinv_3body(*, Nf, Ns, mrho, mpi, pvector, alpha=None, kappa=None, keepE
 def fcdc_rinv_3body_simp(*, rinv, Nf, mrho, mpi, pvector, alpha=None, kappa=None, keepEta1=False):
     Npi = Nf**2 - (1-int(keepEta1)) # neglect eta prime
     Nrho = Nf**2
-    rinv_rho = rinv*Npi/Nrho
 
     if alpha is None:
         alpha = alpha_mean(mrho=mrho, mpi=mpi)
@@ -175,7 +174,7 @@ def fcdc_rinv_3body_simp(*, rinv, Nf, mrho, mpi, pvector, alpha=None, kappa=None
         kappa = mrho/mpi
 
     numer_pi = (1-pvector)*rinv*Npi
-    numer_rho = alpha*kappa*pvector*rinv_rho*Nrho
+    numer_rho = alpha*kappa*pvector*rinv*Nrho
     denom_pi = (1-pvector)*Npi
     denom_rho = kappa*pvector*Nrho
 
@@ -450,17 +449,6 @@ class darkHadron():
         # therefore, in simplified model, two decay types:
         # rho -> pi qq with BR = rinv
         # rho -> qq with BR = 1-rinv
-
-        # however, there is one subtlety:
-        # pion rinv = Nstable/Npi, where Npi = Nf**2-1 if keepEta1 = False
-        # but Nrho = Nf**2 always
-        # therefore, rescale rinv
-        if not self.helper.keepEta1:
-            Npi = self.helper.Nf**2 - 1
-            Nrho = self.helper.Nf**2
-            rinv_rho = self.rinv*Npi/Nrho
-            self.setRinv(rinv_rho)
-
         lines = self.democraticDecay() + self.darkRho3BodyDecay()
         return lines
 
